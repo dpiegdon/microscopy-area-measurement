@@ -84,7 +84,7 @@ class train_models():
                     alpha = rgb_image[:,:,3]
                     rgb_image = rgb_image[:,:,0:3]
                 elif rgb_image.shape[2] == 3:
-                    alpha = np.ones(rgb_image.shape[0:3], dtype=float)
+                    alpha = np.ones(rgb_image.shape[0:2], dtype=float)
                 else:
                     raise ValueError("Training images must have 3 or 4 channels (RGB or RGB+Alpha).")
                 xyz_image = color.convert_colorspace(rgb_image, "rgb", "xyz")
