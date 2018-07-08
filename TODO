@@ -1,0 +1,8 @@
+ * use (randomly selected) image from
+   https://upload.wikimedia.org/wikipedia/commons/e/e3/Pyloric_stomach_LPO.JPG
+   to create some examples and a better howto.
+
+ * properly name image source and license.
+
+ * add extra stage where segments can be edited by user, if required
+
