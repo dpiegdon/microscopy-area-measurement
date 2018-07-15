@@ -85,7 +85,6 @@ def _image_indexed2color(image_xy):
     return result
 
 def _image_color2indexed(image_xyc, expected_segments):
-    # XXX this is kind of messy. found no better way yet.
     # segment 0 (black) is reserved and should never be used
     # expects image in uint8 format
     if image_xyc.shape[2] != 3:
@@ -93,15 +92,11 @@ def _image_color2indexed(image_xyc, expected_segments):
     shape = [image_xyc.shape[0], image_xyc.shape[1]]
     result = np.zeros(shape, dtype=np.uint8)
     done = np.zeros(shape, dtype=np.bool)
-    for x in range(shape[0]):
-        for y in range(shape[1]):
-            for i, color in enumerate(_color_index_palette, start=0):
-                if i > expected_segments:
-                    break
-                if np.all(color == image_xyc[x,y]):
-                    result[x,y] = i
-                    done[x,y] = True
-                    break
+
+    for i, color in enumerate(_color_index_palette, start=0):
+        colormask = np.all(image_xyc == color, axis=-1)
+        result[colormask] = i
+        done[colormask] = True
 
     pixels = shape[0] * shape[1]
     pixels_done = np.sum(done)
