@@ -76,11 +76,32 @@ def _image_indexed2color(image_xy):
         mask = (image_xy == i)
         result[mask] = color
         done[mask] = 1;
+
     pixels = image_xy.shape[0] * image_xy.shape[1]
     pixels_done = np.sum(done)
     if(pixels_done != pixels):
         raise ValueError("Not all pixels were assigned to an index ({}/{}). ".format(pixels_done, pixels)
                     +"Maybe too many segments? Extend _color_index_palette!")
+    return result
+
+def _image_color2indexed(image_xyc, expected_indices):
+    # XXX this is kind of messy. found no better way yet.
+    shape = [image_xyx.shape[0], image_xy.shape[1]]
+    result = np.zeros(shape)
+    done = np.zeros(shape)
+    for x in shape[0], y in shape[1]:
+        for i, color in enumerate(_color_index_palette, start=0):
+            if color == image_xyc[x,y]:
+                result[x,y] = i
+                done[x,y] = 1
+                break
+
+    pixels = shape[0] * shape[1]
+    pixels_done = np.sum(done)
+    if(pixels_done != pixels):
+        raise ValueError("Not all pixels could be assigned to an index ({}/{}). ".format(pixels_done, pixels)
+                    +"Did you edit such that only index-colors are contained in image?")
+
     return result
 
 def _calc_model_segmentation(imagefilename, shape, models, likelihoods, min_object_size=75):
@@ -104,7 +125,21 @@ def _calc_model_segmentation(imagefilename, shape, models, likelihoods, min_obje
 
     # save segmentation
     segmentation_file = str(imagefilename).replace("_preprocessed.png", "_segmentation.png")
-    io.imsave(segmentation_file, _image_indexed2color(segmentation))
+    try:
+        io.imsave(segmentation_file, _image_indexed2color(segmentation))
+    except ValueError:
+        print("ERROR when trying to calculate segmentation for " + imagefilename + ":")
+        raise
+
+    return segmentation
+
+def _load_model_segmentation(imagefilename, shape, models, likelihoods, min_object_size=75):
+    segmentation_file = str(imagefilename).replace("_preprocessed.png", "_segmentation.png")
+    try:
+        segmentation = _image_color2indexed(io.imread(segmentation_file))
+    except ValueError:
+        print("ERROR when trying to load segmentation for " + imagefilename + ":")
+        raise
 
     return segmentation
 
@@ -175,7 +210,11 @@ class apply_models():
 
         likelihoods = _calc_model_likelihoods(shape, points10d, self.models)
 
-        segmentation = _calc_model_segmentation(filename, shape, self.models, likelihoods)
+        load_edited_segmentation = False
+        if(load_edited_segmentation):
+            segmentation = _load_model_segmentation(filename, shape, self,models, likelihoods)
+        else:
+            segmentation = _calc_model_segmentation(filename, shape, self.models, likelihoods)
 
         result = _count_model_segments(filename, self.models, likelihoods, segmentation)
 
