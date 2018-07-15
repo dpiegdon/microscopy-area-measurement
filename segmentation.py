@@ -9,9 +9,12 @@ import sys
 import collections
 
 commands = collections.OrderedDict([
-    ('preprocess', (preprocess.preprocess,     "preprocess images and add alpha channels")),
-    ('train',      (train_models.train_models, "train segmentation models")),
-    ('apply',      (apply_models.apply_models, "apply segmentation models to all images"))
+    ('preprocess',     (preprocess.preprocess,               "preprocess images and add alpha channels")),
+    ('train',          (train_models.train_models,           "train segmentation models")),
+    ('apply',          (apply_models.apply_models,           "apply segmentation models to all images")),
+#    ('applycountable', (apply_models.apply_countable_models, "apply segmentation models to all images,"
+#                                                             + " but make results countable in secondary step")),
+#    ('recount',        (apply_models.recount_results,        "recount results"))
 ])
 
 if __name__ == "__main__":

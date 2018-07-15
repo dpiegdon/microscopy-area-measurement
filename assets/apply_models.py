@@ -12,6 +12,116 @@ from skimage import io, img_as_float
 from skimage import color, filters, morphology
 from sklearn.mixture.gaussian_mixture import _estimate_log_gaussian_prob
 
+def _multivariate_gaussian_prediction(gmm, X):
+    return np.exp(
+                _estimate_log_gaussian_prob(
+                        X,
+                        gmm.means_,
+                        gmm.precisions_cholesky_,
+                        gmm.covariance_type
+                    )
+            )
+
+def _get_preprocessed_image(imagefilename):
+    rgb_image = io.imread(imagefilename)
+    shape = (rgb_image.shape[0], rgb_image.shape[1])
+    if rgb_image.shape[2] == 4:
+        # remove alpha channel
+        rgb_image = img_as_float(rgb_image[:,:,0:-1])
+    elif rgb_image.shape[2] == 3:
+        rgb_image = img_as_float(rgb_image)
+    else:
+        raise ValueError("Images must have 3 or 4 channels (RGB or RGB+Alpha; Alpha is ignored).")
+    xyz_image = color.convert_colorspace(rgb_image, "rgb", "xyz")
+    hsv_image = color.convert_colorspace(rgb_image, "rgb", "hsv")
+    structure_image = img_as_float(
+                            filters.median(
+                                    filters.scharr(
+                                            color.rgb2gray(xyz_image)
+                                    ),
+                                    np.ones( (7,7) )
+                            )
+                      )
+    image10d = np.dstack((rgb_image, xyz_image, hsv_image, structure_image))
+    points10d = image10d.reshape(-1,10)
+
+    return (shape, rgb_image, points10d)
+
+def _get_model_likelihoods(shape, points10d, models):
+    model = {}
+
+    for i, m in enumerate(models, start=1):
+        model[m] = {}
+        model[m]["id"] = i
+
+    for m in models:
+        model[m]["likelihood"] = np.reshape(
+                                        _multivariate_gaussian_prediction(
+                                            models[m],
+                                            points10d
+                                        ),
+                                        shape
+                                    )
+    return model
+
+def _get_model_masks(imagefilename, shape, models, model, min_object_size=75):
+    result = {}
+
+    modelstack = np.zeros(shape)
+    for m in models:
+        mask = np.ones(shape, dtype=bool)
+        for other in models:
+            if m is not other:
+                not_member = model[m]["likelihood"] < model[other]["likelihood"]
+                mask[not_member] = False
+        modelstack[ mask ] = model[m]["id"]
+    for m in models:
+        # remove small specks from model masks:
+        mask = modelstack == model[m]["id"]
+        mask_fixes = np.logical_not(
+                         morphology.remove_small_objects(
+                             np.logical_not(mask), min_size=min_object_size ) )
+        # calculate area of each model
+        pixels = np.sum(mask_fixes)
+        percent = (100. * pixels / (mask.shape[0]*mask.shape[1]))
+        result["filename"] = imagefilename
+        result["segment_"+m+"_area_pixel"]   = pixels
+        result["segment_"+m+"_area_percent"] = percent
+        # apply mask fixes:
+        mask_fixes[mask] = False
+        modelstack[ mask_fixes ] = model[m]["id"]
+
+    return result, modelstack
+
+def _plot_model_masks(imagefilename, rgb_image, models, model, modelstack, result):
+    f, axes = plt.subplots(1+len(models), 2, figsize=(20,8*(1+len(models))))
+    f.suptitle(imagefilename, fontsize=20)
+    (axis_org, axis_segments) = axes[0]
+    axis_org.axis('off')
+    axis_org.imshow(rgb_image)
+    axis_org.set_title("original image", fontsize=16)
+    axis_segments.axis('off')
+    axis_segments.imshow(modelstack)
+    axis_segments.set_title("all segments", fontsize=16)
+    black_pixel = np.array([0,0,0])
+    for (axis_mask, axis_maskedimage), m in zip(axes[1:], model):
+        mask = modelstack == model[m]["id"]
+        axis_mask.axis('off')
+        axis_mask.imshow(mask)
+        axis_mask.set_title("mask '{}': {} pixel".format(
+                                    m, result["segment_"+m+"_area_pixel"]), fontsize=16)
+        maskedimage = np.array(rgb_image)
+        maskedimage[np.logical_not(mask)] = black_pixel
+        axis_maskedimage.axis('off')
+        axis_maskedimage.imshow(maskedimage)
+        axis_maskedimage.set_title("masked image '{}': {:2.2f}%".format(
+                                    m, result["segment_"+m+"_area_percent"]), fontsize=16)
+    plt.axis('off')
+    figure_file = str(imagefilename).replace("_preprocessed.png", "_analysis.png")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(figure_file, facecolor="grey", edgecolor="black")
+
+
 class apply_models():
     def __init__(self, path):
         super().__init__()
@@ -29,112 +139,22 @@ class apply_models():
                                 self.path
                             ))
 
-    def apply_model(self, filename):
-        def multivariate_gaussian_prediction(gmm, X):
-            return np.exp(
-                        _estimate_log_gaussian_prob(
-                                X,
-                                gmm.means_,
-                                gmm.precisions_cholesky_,
-                                gmm.covariance_type
-                            )
-                    )
+    def apply_models(self, filename):
+        shape, rgb_image, points10d = _get_preprocessed_image(filename)
 
-        min_object_size=75
+        model = _get_model_likelihoods(shape, points10d, self.models)
 
-        rgb_image = io.imread(filename)
-        shape = (rgb_image.shape[0], rgb_image.shape[1])
-        if rgb_image.shape[2] == 4:
-            # remove alpha channel
-            rgb_image = img_as_float(rgb_image[:,:,0:-1])
-        elif rgb_image.shape[2] == 3:
-            rgb_image = img_as_float(rgb_image)
-        else:
-            raise ValueError("Images must have 3 or 4 channels (RGB or RGB+Alpha; Alpha is ignored).")
-        xyz_image = color.convert_colorspace(rgb_image, "rgb", "xyz")
-        hsv_image = color.convert_colorspace(rgb_image, "rgb", "hsv")
-        structure_image = img_as_float(
-                                filters.median(
-                                        filters.scharr(
-                                                color.rgb2gray(xyz_image)
-                                        ),
-                                        np.ones( (7,7) )
-                                )
-                          )
-        image10d = np.dstack((rgb_image, xyz_image, hsv_image, structure_image))
-        points10d = image10d.reshape(-1,10)
-        result = {}
-        model = {}
-        for i, m in enumerate(self.models, start=1):
-            model[m] = {}
-            model[m]["id"] = i
-        # calculate model likelihoods:
-        for m in self.models:
-            model[m]["likelihood"] = np.reshape(
-                                            multivariate_gaussian_prediction(
-                                                self.models[m],
-                                                points10d
-                                            ),
-                                            shape
-                                        )
-        # calculate model masks:
-        modelstack = np.zeros(shape)
-        for m in self.models:
-            mask = np.ones(shape, dtype=bool)
-            for other in self.models:
-                if m is not other:
-                    not_member = model[m]["likelihood"] < model[other]["likelihood"]
-                    mask[not_member] = False
-            modelstack[ mask ] = model[m]["id"]
-        for m in self.models:
-            # remove small specks from model masks:
-            mask = modelstack == model[m]["id"]
-            mask_fixes = np.logical_not(
-                             morphology.remove_small_objects(
-                                 np.logical_not(mask), min_size=min_object_size ) )
-            # calculate area of each model
-            pixels = np.sum(mask_fixes)
-            percent = (100. * pixels / (mask.shape[0]*mask.shape[1]))
-            result["filename"] = filename
-            result["segment_"+m+"_area_pixel"]   = pixels
-            result["segment_"+m+"_area_percent"] = percent
-            # apply mask fixes:
-            mask_fixes[mask] = False
-            modelstack[ mask_fixes ] = model[m]["id"]
-        # create overview plot for manual verification
-        f, axes = plt.subplots(1+len(self.models), 2, figsize=(20,8*(1+len(self.models))))
-        f.suptitle(filename, fontsize=20)
-        (axis_org, axis_segments) = axes[0]
-        axis_org.axis('off')
-        axis_org.imshow(rgb_image)
-        axis_org.set_title("original image", fontsize=16)
-        axis_segments.axis('off')
-        axis_segments.imshow(modelstack)
-        axis_segments.set_title("all segments", fontsize=16)
-        black_pixel = np.array([0,0,0])
-        for (axis_mask, axis_maskedimage), m in zip(axes[1:], model):
-            mask = modelstack == model[m]["id"]
-            axis_mask.axis('off')
-            axis_mask.imshow(mask)
-            axis_mask.set_title("mask '{}': {} pixel".format(
-                                        m, result["segment_"+m+"_area_pixel"]), fontsize=16)
-            maskedimage = np.array(rgb_image)
-            maskedimage[np.logical_not(mask)] = black_pixel
-            axis_maskedimage.axis('off')
-            axis_maskedimage.imshow(maskedimage)
-            axis_maskedimage.set_title("masked image '{}': {:2.2f}%".format(
-                                        m, result["segment_"+m+"_area_percent"]), fontsize=16)
-        plt.axis('off')
-        figure_file = str(filename).replace("_preprocessed.png", "_analysis.png")
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(figure_file, facecolor="grey", edgecolor="black")
+        result, modelstack = _get_model_masks(filename, shape, self.models, model)
+
+        _plot_model_masks(filename, rgb_image, self.models, model, modelstack, result)
+
         return result
 
     def run(self):
         #threads = multiprocessing.cpu_count() - 1
         threads = 3
         with multiprocessing.Pool(threads, maxtasksperchild=1) as p:
-            results = p.map(self.apply_model, self.all_images, chunksize=1)
+            results = p.map(self.apply_models, self.all_images, chunksize=1)
 
         csv = "filename;{}\n".format(";".join(("{} area [pixels];{} area [%]".format(m,m) for m in self.models)))
         for result in results:
