@@ -4,6 +4,7 @@
 from assets import preprocess
 from assets import train_models
 from assets import apply_models
+from assets import clear
 
 import sys
 import functools
@@ -13,10 +14,12 @@ import collections
 import warnings
 
 commands = collections.OrderedDict([
-    ('preprocess',     (preprocess.preprocess,               "preprocess images and add alpha channels")),
-    ('train',          (train_models.train_models,           "train segmentation models")),
-    ('apply',          (apply_models.apply_models,           "apply segmentation models to all images")),
-    ('reapply',        (apply_models.reapply_models,         "reapply segmentation according to images that have been edited by user")),
+    ('preprocess',     (preprocess.preprocess,              "preprocess images and add alpha channels")),
+    ('train',          (train_models.train_models,          "train segmentation models")),
+    ('apply',          (apply_models.apply_models,          "apply segmentation models to all images")),
+    ('reapply',        (apply_models.reapply_models,        "reapply segmentation according to images that have been edited by user")),
+    ('clearall',       (clear.clear_all,                    "clear all derived data")),
+    ('clearreallyall', (clear.clear_really_all,             "clear all derived data, including the manually prepared model definitions")),
 ])
 
 if __name__ == "__main__":

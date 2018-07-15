@@ -6,14 +6,13 @@ import multiprocessing
 import collections
 import glob
 import pickle
-import os
 
 from skimage import io, img_as_float
 from skimage import color, filters, morphology
 from sklearn.mixture.gaussian_mixture import _estimate_log_gaussian_prob
 
 from . import filenames
-
+from . import clear
 
 def _multivariate_gaussian_prediction(gmm, X):
     return np.exp(
@@ -189,19 +188,21 @@ def _plot_model_segments(image_file, rgb_image, models, model2id, segmentation, 
         axis_maskedimage.set_title("masked image '{}': {:2.2f}%".format(
                                     m, result["segment_"+m+"_area_percent"]), fontsize=16)
     plt.axis('off')
-    figure_file = filenames.analysis_file(image_file)
+    analysis_file = filenames.analysis_file(image_file)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(figure_file, facecolor="grey", edgecolor="black")
+    plt.savefig(analysis_file, facecolor="grey", edgecolor="black")
 
 
 class apply_models():
+    load_edited_segmentation = False
+    max_threads = 3 # more than this may hog your memory. assume 2GB per thread.
+
     def __init__(self, path):
         super().__init__()
 
-        self.load_edited_segmentation = False
-        self.max_threads = 3 # more than this may hog your memory. assume 2GB per thread.
-
         self.path = path
+
+        clear.clear_applied_results(self.path, self.load_edited_segmentation)
 
         self.models = collections.OrderedDict()
         for modelfile in glob.glob(filenames.model_glob(self.path)):
@@ -211,10 +212,11 @@ class apply_models():
 
         self.all_images = glob.glob(filenames.preprocessed_glob(self.path))
 
-        print("Selected {} images from '{}' to segment.".format(
+        print("Selected {} images from '{}' for segmentation.".format(
                                 len(self.all_images),
                                 self.path
                             ))
+
 
     def apply_model_to_image(self, imagefilename):
         shape, rgb_image, points10d = _get_preprocessed_image(imagefilename)
@@ -242,13 +244,6 @@ class apply_models():
         return result
 
     def run(self):
-        summary_file = filenames.summary_file(self.path)
-        try:
-            os.remove(summary_file)
-            print("Removed old summary file '{}'.".format(summary_file))
-        except FileNotFoundError:
-            pass
-
         threads = multiprocessing.cpu_count() - 1
         if threads > self.max_threads:
             threads = self.max_threads
@@ -263,14 +258,14 @@ class apply_models():
                 csv += ";{};{:2.4f}".format(result["segment_"+m+"_area_pixel"],
                                      result["segment_"+m+"_area_percent"])
             csv += "\n"
-        with open(summary_file, "w") as csv_file:
+        with open(filenames.summary_file(self.path), "w") as csv_file:
             csv_file.write(csv)
 
 
 class reapply_models(apply_models):
     def __init__(self, path):
-        super().__init__(path)
-
         self.load_edited_segmentation = True
         self.max_threads = 6
+
+        super().__init__(path)
 

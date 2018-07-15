@@ -8,11 +8,15 @@ from skimage import io, img_as_ubyte
 from skimage import restoration
 
 from . import filenames
+from . import clear
 
 class preprocess():
     def __init__(self, path):
         super().__init__()
         self.path = path
+
+        clear.clear_preprocessed_images(self.path)
+
         self.all_images = glob.glob(filenames.raw_image_glob(self.path))
         print("Selected {} images to preprocess.".format(len(self.all_images)))
 

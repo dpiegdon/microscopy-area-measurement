@@ -9,11 +9,14 @@ from skimage import color, filters
 from sklearn.mixture import GaussianMixture
 
 from . import filenames
+from . import clear
 
 class train_models():
     def __init__(self, path):
         super().__init__()
         self.path = path
+
+        clear.clear_trained_models(self.path)
 
         model_image_globs = {}
         for m in glob.glob(filenames.modeldir_glob(self.path)):

@@ -1,5 +1,7 @@
 # fdm=indent foldlevel=1 foldnestmax=2
 
+import os
+
 def raw_image_glob(basedir):
     return "{}/*.tif".format(basedir)
 
@@ -21,6 +23,12 @@ def preprocessed_file(base_image_filename):
 
 def preprocessed_glob(basedir):
     return "{}/*_preprocessed.png".format(basedir)
+
+def analysis_glob(basedir):
+    return "{}/*_analysis.png".format(basedir)
+
+def segment_glob(basedir):
+    return "{}/*_segmentation.png".format(basedir)
 
 def segment_file(preprocessed_image_file):
     return str(preprocessed_image_file).replace(
