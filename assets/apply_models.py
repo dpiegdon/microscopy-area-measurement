@@ -58,7 +58,7 @@ def _get_model_likelihoods(shape, points10d, models):
 
     return likelihoods
 
-def _get_model_segmentation(imagefilename, shape, models, likelihoods):
+def _get_model_segmentation(imagefilename, shape, models, likelihoods, min_object_size=75):
     segmentation = np.zeros(shape)
     for m in models:
         modelmask = np.ones(shape, dtype=bool)
@@ -68,30 +68,30 @@ def _get_model_segmentation(imagefilename, shape, models, likelihoods):
                 modelmask[not_member] = False
         segmentation[ modelmask ] = likelihoods[m]["id"]
 
+    # small object removal to hide small artifacts from each segment
+    for m in models:
+        mask = (segmentation == likelihoods[m]["id"])
+        mask_fixes = np.logical_not(
+                         morphology.remove_small_objects(
+                             np.logical_not(mask), min_size=min_object_size ) )
+        #mask_fixes[mask] = False
+        segmentation[ mask_fixes ] = likelihoods[m]["id"]
+
     return segmentation
 
-def _count_model_segments(imagefilename, models, likelihoods, segmentation, min_object_size=75):
+def _count_model_segments(imagefilename, models, likelihoods, segmentation):
     # result[] will contain:
     #   filename: string, filename of image
     #   segment_[model]_pixels: number of pixels that belong most likely to this model
     #   segment_[model]_precent: area that belongs most likely to this model
     result = {}
     for m in models:
-        # remove small specks from model masks:
-        mask = (segmentation == likelihoods[m]["id"])
-        mask_fixes = np.logical_not(
-                         morphology.remove_small_objects(
-                             np.logical_not(mask), min_size=min_object_size ) )
-
-        # calculate area of each model
-        pixels = np.sum(mask_fixes)
-        percent = (100. * pixels / (mask.shape[0]*mask.shape[1]))
+        model_mask = (segmentation == likelihoods[m]["id"])
+        pixels = np.sum(model_mask)
+        percent = (100. * pixels / (model_mask.shape[0] * model_mask.shape[1]))
         result["filename"] = imagefilename
         result["segment_"+m+"_area_pixel"]   = pixels
         result["segment_"+m+"_area_percent"] = percent
-        # apply mask fixes:
-        mask_fixes[mask] = False
-        segmentation[ mask_fixes ] = likelihoods[m]["id"]
 
     return result
 
