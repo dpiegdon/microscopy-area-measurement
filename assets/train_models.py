@@ -8,15 +8,16 @@ from skimage import io, img_as_float
 from skimage import color, filters
 from sklearn.mixture import GaussianMixture
 
+from . import filenames
+
 class train_models():
     def __init__(self, path):
         super().__init__()
         self.path = path
 
         model_image_globs = {}
-        for m in glob.glob("{}/model_*".format(self.path)):
+        for m in glob.glob(filenames.modeldir_glob(self.path)):
             model_name = m.split("model_")[1]
-            print("found model '{}' in '{}'.".format(model_name, m))
             model_image_globs[model_name] = m + "/*"
 
         self.images = {}
@@ -24,19 +25,17 @@ class train_models():
             self.images[m] = io.imread_collection(model_image_globs[m])
             if len(self.images[m]) == 0:
                 del self.images[m]
-                print("removed {} as model has no samples.".format(m))
+                print("REMOVING EMPTY MODEL '{}' AS MODEL HAS NO SAMPLES.".format(m))
             else:
-                print("loaded {} samples for model {}.".format(len(self.images[m]), m))
+                print("Found model '{}' with {} samples.".format(m, len(self.images[m])))
 
     def run(self):
         if len(self.images) == 0:
-            print("no training data?")
-            return -1
+            raise FileNotFoundError("No training data found. Did you supply any?")
 
         segment_points10d = {}
         for m in self.images:
             segment_points10d[m] = []
-            print("retrieving points for model '{}'".format(m))
             for rgb_image in self.images[m]:
                 # ensure correct format and save alpha-channel
                 rgb_image = img_as_float(rgb_image)
@@ -59,17 +58,14 @@ class train_models():
                 opaque_points10d = opaque_points11d[:,0:10]
                 segment_points10d[m].append(opaque_points10d)
             segment_points10d[m] = np.vstack(segment_points10d[m])
-            print("  got {} points for model '{}'".format(segment_points10d[m].shape[0], m))
+            print("Model '{}' has {} pixels.".format(m, segment_points10d[m].shape[0]))
 
         models = {}
         for segment in segment_points10d:
-            print("generating model '{}'".format(segment))
             models[segment] = GaussianMixture(1).fit(segment_points10d[segment])
 
         for m in models:
-            filename = "{}/model-{}.gmmpickle".format(self.path, m)
+            filename = filenames.model_file(self.path, m)
             pickle.dump(models[m], open(filename, "wb"))
-            print("model '{}' saved as {}".format(m, filename))
-
-        return 0
+            print("Model '{}' saved as '{}'".format(m, filename))
 

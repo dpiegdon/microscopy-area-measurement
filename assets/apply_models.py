@@ -6,11 +6,14 @@ import multiprocessing
 import collections
 import glob
 import pickle
-import pathlib
+import os
 
 from skimage import io, img_as_float
 from skimage import color, filters, morphology
 from sklearn.mixture.gaussian_mixture import _estimate_log_gaussian_prob
+
+from . import filenames
+
 
 def _multivariate_gaussian_prediction(gmm, X):
     return np.exp(
@@ -106,9 +109,6 @@ def _image_color2indexed(image_xyc, expected_segments):
 
     return result
 
-def _segment_file(image_file):
-    return str(image_file).replace("_preprocessed.png", "_segmentation.png")
-
 def _calc_model_segmentation(image_file, shape, models, likelihoods, model2id, min_object_size=75):
     segmentation = np.zeros(shape, dtype=np.uint8)
     for m in models:
@@ -129,23 +129,23 @@ def _calc_model_segmentation(image_file, shape, models, likelihoods, model2id, m
         segmentation[ mask_fixes ] = model2id[m]
 
     # save segmentation
+    segment_file = filenames.segment_file(image_file)
     try:
-        io.imsave(_segment_file(image_file), _image_indexed2color(segmentation))
-    except ValueError:
-        print("ERROR when trying to calculate segmentation for " + str(image_file) + ":")
-        raise
+        io.imsave(segment_file, _image_indexed2color(segmentation))
+    except ValueError as e:
+        raise ValueError("ERROR when trying to calculate segmentation for {}: {}".format(segment_file, e))
 
     return segmentation
 
 def _load_model_segmentation(image_file, shape, models, min_object_size=75):
+    segment_file = filenames.segment_file(image_file)
     try:
         segmentation = _image_color2indexed(
-                            io.imread(_segment_file(image_file)),
+                            io.imread(segment_file),
                             len(models)
                         )
-    except ValueError:
-        print("ERROR when trying to load segmentation for " + str(image_file) + ":")
-        raise
+    except ValueError as e:
+        raise ValueError("ERROR when trying to load segmentation for {}: {}".format(segment_file, e))
 
     return segmentation
 
@@ -189,7 +189,7 @@ def _plot_model_segments(image_file, rgb_image, models, model2id, segmentation, 
         axis_maskedimage.set_title("masked image '{}': {:2.2f}%".format(
                                     m, result["segment_"+m+"_area_percent"]), fontsize=16)
     plt.axis('off')
-    figure_file = str(image_file).replace("_preprocessed.png", "_analysis.png")
+    figure_file = filenames.analysis_file(image_file)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(figure_file, facecolor="grey", edgecolor="black")
 
@@ -204,41 +204,57 @@ class apply_models():
         self.path = path
 
         self.models = collections.OrderedDict()
-        for m in glob.glob("{}/model-*.gmmpickle".format(self.path)):
-            model_name = m.split("model-")[1].replace(".gmmpickle", "")
-            print("loading model '{}' from '{}'.".format(model_name, m))
-            self.models[model_name] = pickle.load( open(m, "rb") )
+        for modelfile in glob.glob(filenames.model_glob(self.path)):
+            model_name = filenames.modelname_from_file(modelfile)
+            print("Loading model '{}'.".format(model_name))
+            self.models[model_name] = pickle.load( open(modelfile, "rb") )
 
-        self.all_images = [f for f in pathlib.Path(self.path).glob("*_preprocessed.png")]
-        print("selected {} images from '{}' to segment.".format(
+        self.all_images = glob.glob(filenames.preprocessed_glob(self.path))
+
+        print("Selected {} images from '{}' to segment.".format(
                                 len(self.all_images),
                                 self.path
                             ))
 
-    def apply_models(self, filename):
-        shape, rgb_image, points10d = _get_preprocessed_image(filename)
+    def apply_model_to_image(self, imagefilename):
+        shape, rgb_image, points10d = _get_preprocessed_image(imagefilename)
 
         model2id = {m: i for i, m in enumerate(self.models, start=1)}
 
+        segmentation_valid = False
+
         if self.load_edited_segmentation:
-            segmentation = _load_model_segmentation(filename, shape, self.models)
-        else:
+            try:
+                segmentation = _load_model_segmentation(imagefilename, shape, self.models)
+                segmentation_valid = True
+            except FileNotFoundError as e:
+                print("\n{}".format(e))
+                print("RECOVERING segmentation from model. You may want to RE-EDIT this file!")
+
+        if not segmentation_valid:
             likelihoods = _calc_model_likelihoods(shape, points10d, self.models)
-            segmentation = _calc_model_segmentation(filename, shape, self.models, likelihoods, model2id)
+            segmentation = _calc_model_segmentation(imagefilename, shape, self.models, likelihoods, model2id)
 
-        result = _count_model_segments(filename, self.models, model2id, segmentation)
+        result = _count_model_segments(imagefilename, self.models, model2id, segmentation)
 
-        _plot_model_segments(filename, rgb_image, self.models, model2id, segmentation, result)
+        _plot_model_segments(imagefilename, rgb_image, self.models, model2id, segmentation, result)
 
         return result
 
     def run(self):
+        summary_file = filenames.summary_file(self.path)
+        try:
+            os.remove(summary_file)
+            print("Removed old summary file '{}'.".format(summary_file))
+        except FileNotFoundError:
+            pass
+
         threads = multiprocessing.cpu_count() - 1
         if threads > self.max_threads:
             threads = self.max_threads
 
         with multiprocessing.Pool(threads, maxtasksperchild=1) as p:
-            results = p.map(self.apply_models, self.all_images, chunksize=1)
+            results = p.map(self.apply_model_to_image, self.all_images, chunksize=1)
 
         csv = "filename;{}\n".format(";".join(("{} area [pixels];{} area [%]".format(m,m) for m in self.models)))
         for result in results:
@@ -247,10 +263,8 @@ class apply_models():
                 csv += ";{};{:2.4f}".format(result["segment_"+m+"_area_pixel"],
                                      result["segment_"+m+"_area_percent"])
             csv += "\n"
-        with open("{}/analysis-summary.csv".format(self.path), "w") as csv_file:
+        with open(summary_file, "w") as csv_file:
             csv_file.write(csv)
-
-        return 0
 
 
 class reapply_models(apply_models):

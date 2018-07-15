@@ -6,7 +6,11 @@ from assets import train_models
 from assets import apply_models
 
 import sys
+import functools
+import traceback
 import collections
+
+import warnings
 
 commands = collections.OrderedDict([
     ('preprocess',     (preprocess.preprocess,               "preprocess images and add alpha channels")),
@@ -16,9 +20,11 @@ commands = collections.OrderedDict([
 ])
 
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore", category=UserWarning, module='skimage')
+
     if len(sys.argv) < 3 or sys.argv[1] not in commands:
-        print("required arguments: <command> <path> [path [...] ]")
-        print("where command is one of:")
+        print("Required arguments: <command> <path> [path [...] ]")
+        print("Where command is one of:")
         for c in commands:
             print("  {} -- {}".format(c, commands[c][1]))
         sys.exit(1)
@@ -26,20 +32,31 @@ if __name__ == "__main__":
     taskname = sys.argv[1]
     paths = sys.argv[2:]
 
-    print("processing files in these paths:")
+    print("Processing files in these paths:")
     for path in paths:
         print("  " + path)
 
-    rets = []
-    for path in paths:
-        task = commands[taskname][0](path)
-        ret = task.run()
-        print("task '{}' for path '{}' finished with result '{}'".format(taskname, path, ret))
-        rets.append(ret)
+    rets = collections.OrderedDict()
 
-    print("overall result for task '{}':".format(taskname))
-    for path, ret in zip(paths, rets):
-        print("  path {}: {}".format(path, "ok" if ret == 0 else "error"))
-    ret = sum(rets)
-    sys.exit(ret)
+    for path in paths:
+        print('>'*80)
+        print("Task '{}' for path '{}' starting...".format(taskname, path))
+        task = commands[taskname][0](path)
+        try:
+            task.run()
+            rets[path] = True
+            print("Task '{}' for path '{}' succeeded.".format(taskname, path))
+        except Exception as e:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            exc_text = functools.reduce(lambda x,y: x+y, traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print("RAISED EXCEPTION: \n{}".format(exc_text))
+            rets[path] = False
+        print('<'*80)
+
+    print("\n\nResult summary for task '{}':".format(taskname))
+    overall_ok = True
+    for path in rets:
+        print("  For path '{}': {}".format(path, "ok" if rets[path] else "ERROR"))
+        overall_ok &= rets[path]
+    sys.exit(0 if overall_ok else -1)
 
