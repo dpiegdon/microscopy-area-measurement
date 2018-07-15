@@ -12,9 +12,7 @@ commands = collections.OrderedDict([
     ('preprocess',     (preprocess.preprocess,               "preprocess images and add alpha channels")),
     ('train',          (train_models.train_models,           "train segmentation models")),
     ('apply',          (apply_models.apply_models,           "apply segmentation models to all images")),
-#    ('applycountable', (apply_models.apply_countable_models, "apply segmentation models to all images,"
-#                                                             + " but make results countable in secondary step")),
-#    ('recount',        (apply_models.recount_results,        "recount results"))
+    ('reapply',        (apply_models.reapply_models,         "reapply segmentation according to images that have been edited by user")),
 ])
 
 if __name__ == "__main__":
