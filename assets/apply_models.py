@@ -47,7 +47,7 @@ def _get_preprocessed_image(imagefilename):
 
     return (shape, rgb_image, points10d)
 
-def _get_model_likelihoods(shape, points10d, models):
+def _calc_model_likelihoods(shape, points10d, models):
     likelihoods = {}
 
     for i, m in enumerate(models, start=1):
@@ -58,7 +58,32 @@ def _get_model_likelihoods(shape, points10d, models):
 
     return likelihoods
 
-def _get_model_segmentation(imagefilename, shape, models, likelihoods, min_object_size=75):
+_color_index_palette = [
+        np.array([0.,0.,0.]), # black
+        np.array([1.,0.,0.]), # red
+        np.array([0.,1.,0.]), # green
+        np.array([0.,0.,1.]), # blue
+        np.array([0.,1.,1.]), # cyan
+        np.array([1.,0.,1.]), # magenta
+        np.array([1.,1.,0.]), # yellow
+        np.array([1.,1.,1.]), # white
+]
+
+def _image_indexed2color(image_xy):
+    result = np.zeros([image_xy.shape[0], image_xy.shape[1], 3])
+    done = np.zeros([image_xy.shape[0], image_xy.shape[1]])
+    for i, color in enumerate(_color_index_palette, start=0):
+        mask = (image_xy == i)
+        result[mask] = color
+        done[mask] = 1;
+    pixels = image_xy.shape[0] * image_xy.shape[1]
+    pixels_done = np.sum(done)
+    if(pixels_done != pixels):
+        raise ValueError("Not all pixels were assigned to an index ({}/{}). ".format(pixels_done, pixels)
+                    +"Maybe too many segments? Extend _color_index_palette!")
+    return result
+
+def _calc_model_segmentation(imagefilename, shape, models, likelihoods, min_object_size=75):
     segmentation = np.zeros(shape)
     for m in models:
         modelmask = np.ones(shape, dtype=bool)
@@ -76,6 +101,10 @@ def _get_model_segmentation(imagefilename, shape, models, likelihoods, min_objec
                              np.logical_not(mask), min_size=min_object_size ) )
         #mask_fixes[mask] = False
         segmentation[ mask_fixes ] = likelihoods[m]["id"]
+
+    # save segmentation
+    segmentation_file = str(imagefilename).replace("_preprocessed.png", "_segmentation.png")
+    io.imsave(segmentation_file, _image_indexed2color(segmentation))
 
     return segmentation
 
@@ -144,9 +173,9 @@ class apply_models():
     def apply_models(self, filename):
         shape, rgb_image, points10d = _get_preprocessed_image(filename)
 
-        likelihoods = _get_model_likelihoods(shape, points10d, self.models)
+        likelihoods = _calc_model_likelihoods(shape, points10d, self.models)
 
-        segmentation = _get_model_segmentation(filename, shape, self.models, likelihoods)
+        segmentation = _calc_model_segmentation(filename, shape, self.models, likelihoods)
 
         result = _count_model_segments(filename, self.models, likelihoods, segmentation)
 
