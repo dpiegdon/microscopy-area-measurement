@@ -48,39 +48,41 @@ def _get_preprocessed_image(imagefilename):
     return (shape, rgb_image, points10d)
 
 def _get_model_likelihoods(shape, points10d, models):
-    model = {}
+    likelihoods = {}
 
     for i, m in enumerate(models, start=1):
-        model[m] = {}
-        model[m]["id"] = i
+        likelihoods[m] = {}
+        likelihoods[m]["id"] = i
+        prediction = _multivariate_gaussian_prediction(models[m], points10d)
+        likelihoods[m]["likelihood"] = np.reshape(prediction, shape)
 
+    return likelihoods
+
+def _get_model_segmentation(imagefilename, shape, models, likelihoods):
+    segmentation = np.zeros(shape)
     for m in models:
-        model[m]["likelihood"] = np.reshape(
-                                        _multivariate_gaussian_prediction(
-                                            models[m],
-                                            points10d
-                                        ),
-                                        shape
-                                    )
-    return model
-
-def _get_model_masks(imagefilename, shape, models, model, min_object_size=75):
-    result = {}
-
-    modelstack = np.zeros(shape)
-    for m in models:
-        mask = np.ones(shape, dtype=bool)
+        modelmask = np.ones(shape, dtype=bool)
         for other in models:
             if m is not other:
-                not_member = model[m]["likelihood"] < model[other]["likelihood"]
-                mask[not_member] = False
-        modelstack[ mask ] = model[m]["id"]
+                not_member = likelihoods[m]["likelihood"] < likelihoods[other]["likelihood"]
+                modelmask[not_member] = False
+        segmentation[ modelmask ] = likelihoods[m]["id"]
+
+    return segmentation
+
+def _count_model_segments(imagefilename, models, likelihoods, segmentation, min_object_size=75):
+    # result[] will contain:
+    #   filename: string, filename of image
+    #   segment_[model]_pixels: number of pixels that belong most likely to this model
+    #   segment_[model]_precent: area that belongs most likely to this model
+    result = {}
     for m in models:
         # remove small specks from model masks:
-        mask = modelstack == model[m]["id"]
+        mask = (segmentation == likelihoods[m]["id"])
         mask_fixes = np.logical_not(
                          morphology.remove_small_objects(
                              np.logical_not(mask), min_size=min_object_size ) )
+
         # calculate area of each model
         pixels = np.sum(mask_fixes)
         percent = (100. * pixels / (mask.shape[0]*mask.shape[1]))
@@ -89,11 +91,11 @@ def _get_model_masks(imagefilename, shape, models, model, min_object_size=75):
         result["segment_"+m+"_area_percent"] = percent
         # apply mask fixes:
         mask_fixes[mask] = False
-        modelstack[ mask_fixes ] = model[m]["id"]
+        segmentation[ mask_fixes ] = likelihoods[m]["id"]
 
-    return result, modelstack
+    return result
 
-def _plot_model_masks(imagefilename, rgb_image, models, model, modelstack, result):
+def _plot_model_segments(imagefilename, rgb_image, models, likelihoods, segmentation, result):
     f, axes = plt.subplots(1+len(models), 2, figsize=(20,8*(1+len(models))))
     f.suptitle(imagefilename, fontsize=20)
     (axis_org, axis_segments) = axes[0]
@@ -101,11 +103,11 @@ def _plot_model_masks(imagefilename, rgb_image, models, model, modelstack, resul
     axis_org.imshow(rgb_image)
     axis_org.set_title("original image", fontsize=16)
     axis_segments.axis('off')
-    axis_segments.imshow(modelstack)
+    axis_segments.imshow(segmentation)
     axis_segments.set_title("all segments", fontsize=16)
     black_pixel = np.array([0,0,0])
-    for (axis_mask, axis_maskedimage), m in zip(axes[1:], model):
-        mask = modelstack == model[m]["id"]
+    for (axis_mask, axis_maskedimage), m in zip(axes[1:], likelihoods):
+        mask = segmentation == likelihoods[m]["id"]
         axis_mask.axis('off')
         axis_mask.imshow(mask)
         axis_mask.set_title("mask '{}': {} pixel".format(
@@ -142,11 +144,13 @@ class apply_models():
     def apply_models(self, filename):
         shape, rgb_image, points10d = _get_preprocessed_image(filename)
 
-        model = _get_model_likelihoods(shape, points10d, self.models)
+        likelihoods = _get_model_likelihoods(shape, points10d, self.models)
 
-        result, modelstack = _get_model_masks(filename, shape, self.models, model)
+        segmentation = _get_model_segmentation(filename, shape, self.models, likelihoods)
 
-        _plot_model_masks(filename, rgb_image, self.models, model, modelstack, result)
+        result = _count_model_segments(filename, self.models, likelihoods, segmentation)
+
+        _plot_model_segments(filename, rgb_image, self.models, likelihoods, segmentation, result)
 
         return result
 
